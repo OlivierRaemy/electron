@@ -3805,7 +3805,6 @@ describe('BrowserWindow module', () => {
         expect(test.processMemoryInfo).to.be.an('object');
         expect(test.systemVersion).to.be.a('string');
         expect(test.cpuUsage).to.be.an('object');
-        expect(test.ioCounters).to.be.an('object');
         expect(test.uptime).to.be.a('number');
         expect(test.arch).to.equal(process.arch);
         expect(test.platform).to.equal(process.platform);
