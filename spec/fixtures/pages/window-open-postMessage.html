@@ -5,10 +5,10 @@
     window.opener.postMessage(JSON.stringify({
       origin: e.origin,
       data: e.data,
-      sourceEqualsOpener: e.source.location.href === window.opener.location.href
+      sourceEqualsOpener: e.source === window.opener,
+      sourceId: e.source.guestId
     }), '*');
   });
-  window.opener.postMessage("ready", "*")
 </script>
 </body>
 </html>

@@ -1,27 +1,54 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 
+import atexit
 import contextlib
 import errno
-import json
-import os
+import platform
+import re
 import shutil
+import ssl
 import subprocess
 import sys
-from urllib.request import urlopen
+import tarfile
+import tempfile
+import urllib2
+import os
 import zipfile
 
-# from lib.config import is_verbose_mode
-def is_verbose_mode():
-  return False
+from config import is_verbose_mode
+from env_util import get_vs_env
 
-ELECTRON_DIR = os.path.abspath(
-  os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-)
-TS_NODE = os.path.join(ELECTRON_DIR, 'node_modules', '.bin', 'ts-node')
-SRC_DIR = os.path.abspath(os.path.join(__file__, '..', '..', '..', '..'))
+BOTO_DIR = os.path.abspath(os.path.join(__file__, '..', '..', '..', 'vendor',
+                                        'boto'))
 
-if sys.platform in ['win32', 'cygwin']:
-  TS_NODE += '.cmd'
+
+def get_host_arch():
+  """Returns the host architecture with a predictable string."""
+  host_arch = platform.machine()
+
+  # Convert machine type to format recognized by gyp.
+  if re.match(r'i.86', host_arch) or host_arch == 'i86pc':
+    host_arch = 'ia32'
+  elif host_arch in ['x86_64', 'amd64']:
+    host_arch = 'x64'
+  elif host_arch.startswith('arm'):
+    host_arch = 'arm'
+
+  # platform.machine is based on running kernel. It's possible to use 64-bit
+  # kernel with 32-bit userland, e.g. to give linker slightly more memory.
+  # Distinguish between different userland bitness by querying
+  # the python binary.
+  if host_arch == 'x64' and platform.architecture()[0] == '32bit':
+    host_arch = 'ia32'
+
+  return host_arch
+
+
+def tempdir(prefix=''):
+  directory = tempfile.mkdtemp(prefix=prefix)
+  atexit.register(shutil.rmtree, directory)
+  return directory
+
 
 @contextlib.contextmanager
 def scoped_cwd(path):
@@ -33,20 +60,30 @@ def scoped_cwd(path):
     os.chdir(cwd)
 
 
+@contextlib.contextmanager
+def scoped_env(key, value):
+  origin = ''
+  if key in os.environ:
+    origin = os.environ[key]
+  os.environ[key] = value
+  try:
+    yield
+  finally:
+    os.environ[key] = origin
+
+
 def download(text, url, path):
   safe_mkdir(os.path.dirname(path))
   with open(path, 'wb') as local_file:
-    print("Downloading %s to %s" % (url, path))
-    web_file = urlopen(url)
-    info = web_file.info()
-    if hasattr(info, 'getheader'):
-      file_size = int(info.getheaders("Content-Length")[0])
-    else:
-      file_size = int(info.get("Content-Length")[0])
-    downloaded_size = 0
-    block_size = 4096
+    if hasattr(ssl, '_create_unverified_context'):
+      ssl._create_default_https_context = ssl._create_unverified_context
 
-    ci = os.environ.get('CI') is not None
+    web_file = urllib2.urlopen(url)
+    file_size = int(web_file.info().getheaders("Content-Length")[0])
+    downloaded_size = 0
+    block_size = 128
+
+    ci = os.environ.get('CI') == '1'
 
     while True:
       buf = web_file.read(block_size)
@@ -59,23 +96,35 @@ def download(text, url, path):
       if not ci:
         percent = downloaded_size * 100. / file_size
         status = "\r%s  %10d  [%3.1f%%]" % (text, downloaded_size, percent)
-        print(status, end=' ')
+        print status,
 
     if ci:
-      print("%s done." % (text))
+      print "%s done." % (text)
     else:
-      print()
+      print
   return path
 
+
+def extract_tarball(tarball_path, member, destination):
+  with tarfile.open(tarball_path) as tarball:
+    tarball.extract(member, destination)
+
+
+def extract_zip(zip_path, destination):
+  if sys.platform == 'darwin':
+    # Use unzip command on Mac to keep symbol links in zip file work.
+    execute(['unzip', zip_path, '-d', destination])
+  else:
+    with zipfile.ZipFile(zip_path) as z:
+      z.extractall(destination)
 
 def make_zip(zip_file_path, files, dirs):
   safe_unlink(zip_file_path)
   if sys.platform == 'darwin':
-    allfiles = files + dirs
-    execute(['zip', '-r', '-y', zip_file_path] + allfiles)
+    files += dirs
+    execute(['zip', '-r', '-y', zip_file_path] + files)
   else:
-    zip_file = zipfile.ZipFile(zip_file_path, "w", zipfile.ZIP_DEFLATED,
-                               allowZip64=True)
+    zip_file = zipfile.ZipFile(zip_file_path, "w", zipfile.ZIP_DEFLATED)
     for filename in files:
       zip_file.write(filename, filename)
     for dirname in dirs:
@@ -108,101 +157,90 @@ def safe_mkdir(path):
       raise
 
 
-def execute(argv, env=None, cwd=None):
-  if env is None:
-    env = os.environ
+def execute(argv, env=os.environ):
   if is_verbose_mode():
-    print(' '.join(argv))
+    print ' '.join(argv)
   try:
-    output = subprocess.check_output(argv, stderr=subprocess.STDOUT,
-                                     env=env, cwd=cwd)
+    output = subprocess.check_output(argv, stderr=subprocess.STDOUT, env=env)
     if is_verbose_mode():
-      print(output)
+      print output
     return output
   except subprocess.CalledProcessError as e:
-    print(e.output)
+    print e.output
     raise e
 
 
-def get_electron_branding():
+def execute_stdout(argv, env=os.environ):
+  if is_verbose_mode():
+    print ' '.join(argv)
+    try:
+      subprocess.check_call(argv, env=env)
+    except subprocess.CalledProcessError as e:
+      print e.output
+      raise e
+  else:
+    execute(argv, env)
+
+
+def electron_gyp():
   SOURCE_ROOT = os.path.abspath(os.path.join(__file__, '..', '..', '..'))
-  branding_file_path = os.path.join(
-    SOURCE_ROOT, 'shell', 'app', 'BRANDING.json')
-  with open(branding_file_path) as f:
-    return json.load(f)
+  gyp = os.path.join(SOURCE_ROOT, 'electron.gyp')
+  with open(gyp) as f:
+    obj = eval(f.read());
+    return obj['variables']
 
 
-cached_electron_version = None
 def get_electron_version():
-  global cached_electron_version
-  if cached_electron_version is None:
-    cached_electron_version = str.strip(execute([
-      'node',
-      '-p',
-      'require("./script/lib/get-version").getElectronVersion()'
-    ], cwd=ELECTRON_DIR).decode())
-  return cached_electron_version
+  return 'v' + electron_gyp()['version%']
 
-def store_artifact(prefix, key_prefix, files):
-  # Azure Storage
-  azput(prefix, key_prefix, files)
 
-def azput(prefix, key_prefix, files):
+def parse_version(version):
+  if version[0] == 'v':
+    version = version[1:]
+
+  vs = version.split('.')
+  if len(vs) > 4:
+    return vs[0:4]
+  else:
+    return vs + ['0'] * (4 - len(vs))
+
+
+def boto_path_dirs():
+  return [
+    os.path.join(BOTO_DIR, 'build', 'lib'),
+    os.path.join(BOTO_DIR, 'build', 'lib.linux-x86_64-2.7')
+  ]
+
+
+def run_boto_script(access_key, secret_key, script_name, *args):
   env = os.environ.copy()
-  output = execute([
-    'node',
-    os.path.join(os.path.dirname(__file__), 'azput.js'),
+  env['AWS_ACCESS_KEY_ID'] = access_key
+  env['AWS_SECRET_ACCESS_KEY'] = secret_key
+  env['PYTHONPATH'] = os.path.pathsep.join(
+      [env.get('PYTHONPATH', '')] + boto_path_dirs())
+
+  boto = os.path.join(BOTO_DIR, 'bin', script_name)
+  execute([sys.executable, boto] + list(args), env)
+
+
+def s3put(bucket, access_key, secret_key, prefix, key_prefix, files):
+  args = [
+    '--bucket', bucket,
     '--prefix', prefix,
     '--key_prefix', key_prefix,
-  ] + files, env)
-  print(output)
+    '--grant', 'public-read'
+  ] + files
 
-def get_out_dir():
-  out_dir = 'Debug'
-  override = os.environ.get('ELECTRON_OUT_DIR')
-  if override is not None:
-    out_dir = override
-  return os.path.join(SRC_DIR, 'out', out_dir)
+  run_boto_script(access_key, secret_key, 's3put', *args)
 
-# NOTE: This path is not created by gn, it is used as a scratch zone by our
-#       upload scripts
-def get_dist_dir():
-  return os.path.join(get_out_dir(), 'gen', 'electron_dist')
 
-def get_electron_exec():
-  out_dir = get_out_dir()
+def import_vs_env(target_arch):
+  if sys.platform != 'win32':
+    return
 
-  if sys.platform == 'darwin':
-    return '{0}/Electron.app/Contents/MacOS/Electron'.format(out_dir)
-  if sys.platform == 'win32':
-    return '{0}/electron.exe'.format(out_dir)
-  if sys.platform == 'linux':
-    return '{0}/electron'.format(out_dir)
-
-  raise Exception(
-      "get_electron_exec: unexpected platform '{0}'".format(sys.platform))
-
-def get_buildtools_executable(name):
-  buildtools = os.path.realpath(os.path.join(ELECTRON_DIR, '..', 'buildtools'))
-  chromium_platform = {
-    'darwin': 'mac',
-    'linux': 'linux64',
-    'linux2': 'linux64',
-    'win32': 'win',
-    'cygwin': 'win',
-  }[sys.platform]
-  path = os.path.join(buildtools, chromium_platform, name)
-  if sys.platform == 'win32':
-    path += '.exe'
-  return path
-
-def get_linux_binaries():
-  return [
-    'chrome-sandbox',
-    'chrome_crashpad_handler',
-    get_electron_branding()['project_name'],
-    'libEGL.so',
-    'libGLESv2.so',
-    'libffmpeg.so',
-    'libvk_swiftshader.so',
-  ]
+  if target_arch == 'ia32':
+    vs_arch = 'amd64_x86'
+  else:
+    vs_arch = 'x86_amd64'
+  env = get_vs_env('14.0', vs_arch)
+  os.environ.update(env)

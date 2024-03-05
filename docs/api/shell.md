@@ -2,19 +2,15 @@
 
 > Manage files and URLs using their default applications.
 
-Process: [Main](../glossary.md#main-process), [Renderer](../glossary.md#renderer-process) (non-sandboxed only)
-
 The `shell` module provides functions related to desktop integration.
 
 An example of opening a URL in the user's default browser:
 
-```js
-const { shell } = require('electron')
+```javascript
+const {shell} = require('electron')
 
 shell.openExternal('https://github.com')
 ```
-
-**Note:** While the `shell` module can be used in the renderer process, it will not function in a sandboxed renderer.
 
 ## Methods
 
@@ -22,40 +18,35 @@ The `shell` module has the following methods:
 
 ### `shell.showItemInFolder(fullPath)`
 
-* `fullPath` string
+* `fullPath` String
 
-Show the given file in a file manager. If possible, select the file.
+Show the given file in a file manager. If possible, select the file. Returns
+true if the item was successfully shown, false otherwise.
 
-### `shell.openPath(path)`
+### `shell.openItem(fullPath)`
 
-* `path` string
+* `fullPath` String
 
-Returns `Promise<string>` - Resolves with a string containing the error message corresponding to the failure if a failure occurred, otherwise "".
-
-Open the given file in the desktop's default manner.
+Open the given file in the desktop's default manner. Returns true if the item
+was successfully opened, false otherwise.
 
 ### `shell.openExternal(url[, options])`
 
-* `url` string - Max 2081 characters on windows.
-* `options` Object (optional)
-  * `activate` boolean (optional) _macOS_ - `true` to bring the opened application to the foreground. The default is `true`.
-  * `workingDirectory` string (optional) _Windows_ - The working directory.
-  * `logUsage` boolean (optional) _Windows_ - Indicates a user initiated launch that enables tracking of frequently used programs and other behaviors.
-                                              The default is `false`.
+* `url` String
+* `options` Object (optional) _macOS_
+  * `activate` Boolean - `true` to bring the opened application to the
+    foreground. The default is `true`.
 
-Returns `Promise<void>`
+Open the given external protocol URL in the desktop's default manner. (For
+example, mailto: URLs in the user's default mail agent.) Returns true if an
+application was available to open the URL, false otherwise.
 
-Open the given external protocol URL in the desktop's default manner. (For example, mailto: URLs in the user's default mail agent).
+### `shell.moveItemToTrash(fullPath)`
 
-### `shell.trashItem(path)`
+* `fullPath` String
 
-* `path` string - path to the item to be moved to the trash.
-
-Returns `Promise<void>` - Resolves when the operation has been completed.
-Rejects if there was an error while deleting the requested item.
-
-This moves a path to the OS-specific trash location (Trash on macOS, Recycle
-Bin on Windows, and a desktop-environment-specific location on Linux).
+Move the given file to trash and returns a boolean status for the operation.
+Returns true if the item was successfully moved to the trash, false otherwise.
 
 ### `shell.beep()`
 
@@ -63,24 +54,36 @@ Play the beep sound.
 
 ### `shell.writeShortcutLink(shortcutPath[, operation], options)` _Windows_
 
-* `shortcutPath` string
-* `operation` string (optional) - Default is `create`, can be one of following:
+* `shortcutPath` String
+* `operation` String (optional) - Default is `create`, can be one of followings:
   * `create` - Creates a new shortcut, overwriting if necessary.
   * `update` - Updates specified properties only on an existing shortcut.
   * `replace` - Overwrites an existing shortcut, fails if the shortcut doesn't
     exist.
-* `options` [ShortcutDetails](structures/shortcut-details.md)
+* `options` Object
+  * `target` String - The target to launch from this shortcut.
+  * `cwd` String (optional) - The working directory. Default
+    is empty.
+  * `args` String (optional) - The arguments to be applied to `target` when
+    launching from this shortcut. Default is empty.
+  * `description` String (optional) - The description of the shortcut. Default
+    is empty.
+  * `icon` String (optional) - The path to the icon, can be a DLL or EXE. `icon`
+    and `iconIndex` have to be set together. Default is empty, which uses the
+    target's icon.
+  * `iconIndex` Integer (optional) - The resource ID of icon when `icon` is a
+    DLL or EXE. Default is 0.
+  * `appUserModelId` String (optional) - The Application User Model ID. Default
+    is empty.
 
-Returns `boolean` - Whether the shortcut was created successfully.
-
-Creates or updates a shortcut link at `shortcutPath`.
+Creates or updates a shortcut link at `shortcutPath`. On success `true` is
+returned, otherwise `false` is returned.
 
 ### `shell.readShortcutLink(shortcutPath)` _Windows_
 
-* `shortcutPath` string
+* `shortcutPath` String
 
-Returns [`ShortcutDetails`](structures/shortcut-details.md)
-
-Resolves the shortcut link at `shortcutPath`.
+Resolves the shortcut link at `shortcutPath`. An object is returned with the
+fields described in the `options` of `shell.writeShortcutLink`.
 
 An exception will be thrown when any error happens.

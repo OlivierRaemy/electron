@@ -1,89 +1,80 @@
 # Online/Offline Event Detection
 
-## Overview
+Online and offline event detection can be implemented in the renderer process
+using standard HTML5 APIs, as shown in the following example.
 
-[Online and offline event](https://developer.mozilla.org/en-US/docs/Online_and_offline_events)
-detection can be implemented in the Renderer process using the
-[`navigator.onLine`](http://html5index.org/Offline%20-%20NavigatorOnLine.html)
-attribute, part of standard HTML5 API.
+_main.js_
 
-The `navigator.onLine` attribute returns:
+```javascript
+const {app, BrowserWindow} = require('electron')
 
-* `false` if all network requests are guaranteed to fail (e.g. when disconnected from the network).
-* `true` in all other cases.
+let onlineStatusWindow
 
-Since many cases return `true`, you should treat with care situations of
-getting false positives, as we cannot always assume that `true` value means
-that Electron can access the Internet. For example, in cases when the computer
-is running a virtualization software that has virtual Ethernet adapters in "always
-connected" state. Therefore, if you want to determine the Internet access
-status of Electron, you should develop additional means for this check.
+app.on('ready', () => {
+  onlineStatusWindow = new BrowserWindow({ width: 0, height: 0, show: false })
+  onlineStatusWindow.loadURL(`file://${__dirname}/online-status.html`)
+})
+```
 
-## Example
+_online-status.html_
 
-Starting with an HTML file `index.html`, this example will demonstrate how the `navigator.onLine` API can be used to build a connection status indicator.
-
-```html title="index.html"
+```html
 <!DOCTYPE html>
 <html>
-<head>
-    <meta charset="UTF-8">
-    <title>Hello World!</title>
-    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline';" />
-</head>
 <body>
-    <h1>Connection status: <strong id='status'></strong></h1>
-    <script src="renderer.js"></script>
+<script>
+  const alertOnlineStatus = () => {
+    window.alert(navigator.onLine ? 'online' : 'offline')
+  }
+
+  window.addEventListener('online',  alertOnlineStatus)
+  window.addEventListener('offline',  alertOnlineStatus)
+
+  alertOnlineStatus()
+</script>
 </body>
 </html>
 ```
 
-In order to mutate the DOM, create a `renderer.js` file that adds event listeners to the `'online'` and `'offline'` `window` events. The event handler sets the content of the `<strong id='status'>` element depending on the result of `navigator.onLine`.
+There may be instances where you want to respond to these events in the
+main process as well. The main process however does not have a
+`navigator` object and thus cannot detect these events directly. Using
+Electron's inter-process communication utilities, the events can be forwarded
+to the main process and handled as needed, as shown in the following example.
 
-```js title='renderer.js'
-const updateOnlineStatus = () => {
-  document.getElementById('status').innerHTML = navigator.onLine ? 'online' : 'offline'
-}
+_main.js_
 
-window.addEventListener('online', updateOnlineStatus)
-window.addEventListener('offline', updateOnlineStatus)
+```javascript
+const {app, BrowserWindow, ipcMain} = require('electron')
+let onlineStatusWindow
 
-updateOnlineStatus()
-```
-
-Finally, create a `main.js` file for main process that creates the window.
-
-```js title='main.js'
-const { app, BrowserWindow } = require('electron')
-
-const createWindow = () => {
-  const onlineStatusWindow = new BrowserWindow({
-    width: 400,
-    height: 100
-  })
-
-  onlineStatusWindow.loadFile('index.html')
-}
-
-app.whenReady().then(() => {
-  createWindow()
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow()
-    }
-  })
+app.on('ready', () => {
+  onlineStatusWindow = new BrowserWindow({ width: 0, height: 0, show: false })
+  onlineStatusWindow.loadURL(`file://${__dirname}/online-status.html`)
 })
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit()
+ipcMain.on('online-status-changed', (event, status) => {
+  console.log(status)
+})
+```
+
+_online-status.html_
+
+```html
+<!DOCTYPE html>
+<html>
+<body>
+<script>
+  const {ipcRenderer} = require('electron')
+  const updateOnlineStatus = () => {
+    ipcRenderer.send('online-status-changed', navigator.onLine ? 'online' : 'offline')
   }
-})
+
+  window.addEventListener('online',  updateOnlineStatus)
+  window.addEventListener('offline',  updateOnlineStatus)
+
+  updateOnlineStatus()
+</script>
+</body>
+</html>
 ```
-
-After launching the Electron application, you should see the notification:
-
-![Connection status](../images/connection-status.png)
-
-> Note: If you need to communicate the connection status to the main process, use the [IPC renderer](../api/ipc-renderer.md) API.

@@ -1,6 +1,6 @@
 # Windows Store Guide
 
-With Windows 10, the good old win32 executable got a new sibling: The Universal
+With Windows 8, the good old win32 executable got a new sibling: The Universal
 Windows Platform. The new `.appx` format does not only enable a number of new
 powerful APIs like Cortana or Push Notifications, but through the Windows Store,
 also simplifies installation and updating.
@@ -30,25 +30,26 @@ applications.
 To compile any existing Electron app, ensure that you have the following
 requirements:
 
-* Windows 10 with Anniversary Update (released August 2nd, 2016)
+* Windows 10 Anniversary Update (until the update is released to the general public,
+developers can use the Windows Insider Preview)
 * The Windows 10 SDK, [downloadable here][windows-sdk]
 * At least Node 4 (to check, run `node -v`)
 
 Then, go and install the `electron-windows-store` CLI:
 
-```sh
+```
 npm install -g electron-windows-store
 ```
 
 ## Step 1: Package Your Electron Application
 
-Package the application using [`@electron/packager`][electron-packager] (or a similar tool).
+Package the application using [electron-packager][electron-packager] (or a similar tool).
 Make sure to remove `node_modules` that you don't need in your final application, since
-any module you don't actually need will increase your application's size.
+any module you don't actually need will just increase your application's size.
 
 The output should look roughly like this:
 
-```plaintext
+```
 ├── Ghost.exe
 ├── LICENSE
 ├── content_resources_200_percent.pak
@@ -62,12 +63,15 @@ The output should look roughly like this:
 │   ├── am.pak
 │   ├── ar.pak
 │   ├── [...]
+├── natives_blob.bin
 ├── node.dll
 ├── resources
-│   └── app.asar
-├── v8_context_snapshot.bin
+│   ├── app
+│   └── atom.asar
+├── snapshot_blob.bin
 ├── squirrel.exe
-└── ui_resources_200_percent.pak
+├── ui_resources_200_percent.pak
+└── xinput1_3.dll
 ```
 
 ## Step 2: Running electron-windows-store
@@ -77,10 +81,11 @@ From an elevated PowerShell (run it "as Administrator"), run
 and output directories, the app's name and version, and confirmation that
 `node_modules` should be flattened.
 
-```powershell
+```
 electron-windows-store `
     --input-directory C:\myelectronapp `
     --output-directory C:\output\myelectronapp `
+    --flatten true `
     --package-version 1.0.0.0 `
     --package-name myelectronapp
 ```
@@ -100,21 +105,16 @@ automatically install the package on your machine.
 
 ## Step 3: Using the AppX Package
 
-In order to run your package, your users will need Windows 10 with the so-called
-"Anniversary Update" - details on how to update Windows can be found [here][how-to-update].
-
-In opposition to traditional UWP apps, packaged apps currently need to undergo a
-manual verification process, for which you can apply [here][centennial-campaigns].
-In the meantime, all users will be able to install your package by double-clicking it,
-so a submission to the store might not be necessary if you're looking for an
-easier installation method. In managed environments (usually enterprises), the
-`Add-AppxPackage` [PowerShell Cmdlet can be used to install it in an automated fashion][add-appxpackage].
+Since the Windows Anniversary Update (codenamed Windows Redstone) has not been
+released to consumers yet, you won't be able to release your app to the Windows
+Store until later this year - but you can already use the `Add-AppxPackage`
+[PowerShell Cmdlet to install it on machines][add-appxpackage]
+in developer or enterprise environments.
 
 Another important limitation is that the compiled AppX package still contains a
 win32 executable - and will therefore not run on Xbox, HoloLens, or Phones.
 
 ## Optional: Add UWP Features using a BackgroundTask
-
 You can pair your Electron app up with an invisible UWP background task that
 gets to make full use of Windows 10 features - like push notifications,
 Cortana integration, or live tiles.
@@ -122,7 +122,7 @@ Cortana integration, or live tiles.
 To check out how an Electron app that uses a background task to send toast
 notifications and live tiles, [check out the Microsoft-provided sample][background-task].
 
-## Optional: Convert using Container Virtualization
+## Optional: Convert using Container Virtualiziation
 
 To generate the AppX package, the `electron-windows-store` CLI uses a template
 that should work for most Electron apps. However, if you are using a custom
@@ -132,7 +132,7 @@ that mode, the CLI will install and run your application in blank Windows Contai
 to determine what modifications your application is exactly doing to the operating
 system.
 
-Before running the CLI for the first time, you will have to setup the "Windows Desktop App
+Before running the CLI for the, you will have to setup the "Windows Desktop App
 Converter". This will take a few minutes, but don't worry - you only have to do
 this once. Download and Desktop App Converter from [here][app-converter].
 You will receive two files: `DesktopAppConverter.zip` and `BaseImage-14316.wim`.
@@ -148,11 +148,9 @@ You will receive two files: `DesktopAppConverter.zip` and `BaseImage-14316.wim`.
 
 Once installation succeeded, you can move on to compiling your Electron app.
 
-[windows-sdk]: https://developer.microsoft.com/en-us/windows/downloads/windows-sdk/
-[app-converter]: https://learn.microsoft.com/en-us/windows/msix/packaging-tool/tool-overview
-[add-appxpackage]: https://learn.microsoft.com/en-us/previous-versions//hh856048(v=technet.10)?redirectedfrom=MSDN
-[electron-packager]: https://github.com/electron/packager
-[electron-windows-store]: https://github.com/electron-userland/electron-windows-store
+[windows-sdk]: https://developer.microsoft.com/en-us/windows/downloads/windows-10-sdk
+[app-converter]: https://www.microsoft.com/en-us/download/details.aspx?id=51691
+[add-appxpackage]: https://technet.microsoft.com/en-us/library/hh856048.aspx
+[electron-packager]: https://github.com/electron-userland/electron-packager
+[electron-windows-store]: https://github.com/catalystcode/electron-windows-store
 [background-task]: https://github.com/felixrieseberg/electron-uwp-background
-[centennial-campaigns]: https://developer.microsoft.com/en-us/windows/projects/campaigns/desktop-bridge
-[how-to-update]: https://blogs.windows.com/windowsexperience/2016/08/02/how-to-get-the-windows-10-anniversary-update

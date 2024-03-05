@@ -1,58 +1,39 @@
 # desktopCapturer
 
 > Access information about media sources that can be used to capture audio and
-> video from the desktop using the [`navigator.mediaDevices.getUserMedia`][] API.
-
-Process: [Main](../glossary.md#main-process)
+> video from the desktop using the [`navigator.webkitGetUserMedia`] API.
 
 The following example shows how to capture video from a desktop window whose
 title is `Electron`:
 
-```js
-// In the main process.
-const { BrowserWindow, desktopCapturer } = require('electron')
+```javascript
+// In the renderer process.
+const {desktopCapturer} = require('electron')
 
-const mainWindow = new BrowserWindow()
-
-desktopCapturer.getSources({ types: ['window', 'screen'] }).then(async sources => {
-  for (const source of sources) {
-    if (source.name === 'Electron') {
-      mainWindow.webContents.send('SET_SOURCE', source.id)
+desktopCapturer.getSources({types: ['window', 'screen']}, (error, sources) => {
+  if (error) throw error
+  for (let i = 0; i < sources.length; ++i) {
+    if (sources[i].name === 'Electron') {
+      navigator.webkitGetUserMedia({
+        audio: false,
+        video: {
+          mandatory: {
+            chromeMediaSource: 'desktop',
+            chromeMediaSourceId: sources[i].id,
+            minWidth: 1280,
+            maxWidth: 1280,
+            minHeight: 720,
+            maxHeight: 720
+          }
+        }
+      }, handleStream, handleError)
       return
     }
   }
 })
-```
-
-```js @ts-nocheck
-// In the preload script.
-const { ipcRenderer } = require('electron')
-
-ipcRenderer.on('SET_SOURCE', async (event, sourceId) => {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: {
-        mandatory: {
-          chromeMediaSource: 'desktop',
-          chromeMediaSourceId: sourceId,
-          minWidth: 1280,
-          maxWidth: 1280,
-          minHeight: 720,
-          maxHeight: 720
-        }
-      }
-    })
-    handleStream(stream)
-  } catch (e) {
-    handleError(e)
-  }
-})
 
 function handleStream (stream) {
-  const video = document.querySelector('video')
-  video.srcObject = stream
-  video.onloadedmetadata = (e) => video.play()
+  document.querySelector('video').src = URL.createObjectURL(stream)
 }
 
 function handleError (e) {
@@ -61,55 +42,44 @@ function handleError (e) {
 ```
 
 To capture video from a source provided by `desktopCapturer` the constraints
-passed to [`navigator.mediaDevices.getUserMedia`][] must include
+passed to [`navigator.webkitGetUserMedia`] must include
 `chromeMediaSource: 'desktop'`, and `audio: false`.
 
 To capture both audio and video from the entire desktop the constraints passed
-to [`navigator.mediaDevices.getUserMedia`][] must include `chromeMediaSource: 'desktop'`,
-for both `audio` and `video`, but should not include a `chromeMediaSourceId` constraint.
-
-```js
-const constraints = {
-  audio: {
-    mandatory: {
-      chromeMediaSource: 'desktop'
-    }
-  },
-  video: {
-    mandatory: {
-      chromeMediaSource: 'desktop'
-    }
-  }
-}
-```
+to [`navigator.webkitGetUserMedia`] must include `chromeMediaSource: 'screen'`,
+and `audio: true`, but should not include a `chromeMediaSourceId` constraint.
 
 ## Methods
 
 The `desktopCapturer` module has the following methods:
 
-### `desktopCapturer.getSources(options)`
+### `desktopCapturer.getSources(options, callback)`
 
 * `options` Object
-  * `types` string[] - An array of strings that lists the types of desktop sources
-    to be captured, available types can be `screen` and `window`.
-  * `thumbnailSize` [Size](structures/size.md) (optional) - The size that the media source thumbnail
-    should be scaled to. Default is `150` x `150`. Set width or height to 0 when you do not need
-    the thumbnails. This will save the processing time required for capturing the content of each
-    window and screen.
-  * `fetchWindowIcons` boolean (optional) - Set to true to enable fetching window icons. The default
-    value is false. When false the appIcon property of the sources return null. Same if a source has
-    the type screen.
+  * `types` Array - An array of String that lists the types of desktop sources
+    to be captured, available types are `screen` and `window`.
+  * `thumbnailSize` Object (optional) - The suggested size that the media source
+    thumbnail should be scaled to, defaults to `{width: 150, height: 150}`.
+* `callback` Function
 
-Returns `Promise<DesktopCapturerSource[]>` - Resolves with an array of [`DesktopCapturerSource`](structures/desktop-capturer-source.md) objects, each `DesktopCapturerSource` represents a screen or an individual window that can be captured.
+Starts gathering information about all available desktop media sources,
+and calls `callback(error, sources)` when finished.
 
-**Note** Capturing the screen contents requires user consent on macOS 10.15 Catalina or higher,
-which can detected by [`systemPreferences.getMediaAccessStatus`][].
+`sources` is an array of `Source` objects, each `Source` represents a
+screen or an individual window that can be captured, and has the following
+properties:
 
-[`navigator.mediaDevices.getUserMedia`]: https://developer.mozilla.org/en/docs/Web/API/MediaDevices/getUserMedia
-[`systemPreferences.getMediaAccessStatus`]: system-preferences.md#systempreferencesgetmediaaccessstatusmediatype-windows-macos
+* `id` String - The identifier of a window or screen that can be used as a
+  `chromeMediaSourceId` constraint when calling
+  [`navigator.webkitGetUserMedia`]. The format of the identifier will be
+  `window:XX` or `screen:XX`, where `XX` is a random generated number.
+* `name` String - A screen source will be named either `Entire Screen` or
+  `Screen <index>`, while the name of a window source will match the window
+  title.
+* `thumbnail` [NativeImage](native-image.md) - A thumbnail image. **Note:**
+  There is no guarantee that the size of the thumbnail is the same as the
+  `thumnbailSize` specified in the `options` passed to
+  `desktopCapturer.getSources`. The actual size depends on the scale of the
+  screen or window.
 
-## Caveats
-
-`navigator.mediaDevices.getUserMedia` does not work on macOS for audio capture due to a fundamental limitation whereby apps that want to access the system's audio require a [signed kernel extension](https://developer.apple.com/library/archive/documentation/Security/Conceptual/System_Integrity_Protection_Guide/KernelExtensions/KernelExtensions.html). Chromium, and by extension Electron, does not provide this.
-
-It is possible to circumvent this limitation by capturing system audio with another macOS app like Soundflower and passing it through a virtual audio input device. This virtual device can then be queried with `navigator.mediaDevices.getUserMedia`.
+[`navigator.webkitGetUserMedia`]: https://developer.mozilla.org/en/docs/Web/API/Navigator/getUserMedia
